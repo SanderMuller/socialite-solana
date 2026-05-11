@@ -11,11 +11,8 @@
   ],
   "repositories": [
     {
-      "type": "path",
-      "url": "../solana-pubkey",
-      "options": {
-        "symlink": true
-      }
+      "type": "vcs",
+      "url": "https://github.com/SanderMuller/solana-pubkey"
     }
   ],
   "require": {
@@ -23,7 +20,7 @@
     "ext-sodium": "*",
     "laravel/framework": "^11.0|^12.0|^13.0",
     "laravel/socialite": "^5.0",
-    "sandermuller/solana-pubkey": "@dev",
+    "sandermuller/solana-pubkey": "dev-main",
     "socialiteproviders/manager": "^4.8"
   },
   "require-dev": {
