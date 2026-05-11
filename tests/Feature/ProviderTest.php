@@ -3,6 +3,8 @@
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Session;
 use Laravel\Socialite\Facades\Socialite;
+use SanderMuller\SocialiteSolana\Challenge;
+use SanderMuller\SocialiteSolana\Contracts\ChallengeStore;
 use SanderMuller\SocialiteSolana\Exceptions\AddressMismatchException;
 use SanderMuller\SocialiteSolana\Exceptions\ChallengeExpiredException;
 use SanderMuller\SocialiteSolana\Exceptions\ChallengeNotFoundException;
@@ -12,6 +14,7 @@ use SanderMuller\SocialiteSolana\Exceptions\MessageMismatchException;
 use SanderMuller\SocialiteSolana\Exceptions\MissingChallengeParameterException;
 use SanderMuller\SocialiteSolana\Exceptions\SolanaAuthException;
 use SanderMuller\SocialiteSolana\Provider;
+use SanderMuller\SocialiteSolana\Stores\SessionChallengeStore;
 
 use function SanderMuller\SocialiteSolana\Tests\generateKeypair;
 use function SanderMuller\SocialiteSolana\Tests\signMessageBase58;
@@ -266,16 +269,16 @@ it('works against the cache-backed ChallengeStore for sessionless API flows', fu
 });
 
 it('honours a container-bound custom ChallengeStore', function (): void {
-    $custom = new class implements SanderMuller\SocialiteSolana\Contracts\ChallengeStore {
-        /** @var array<string, \SanderMuller\SocialiteSolana\Challenge> */
+    $custom = new class implements ChallengeStore {
+        /** @var array<string, Challenge> */
         public array $stored = [];
 
-        public function put(SanderMuller\SocialiteSolana\Challenge $challenge): void
+        public function put(Challenge $challenge): void
         {
             $this->stored[$challenge->nonce] = $challenge;
         }
 
-        public function find(string $nonce): ?SanderMuller\SocialiteSolana\Challenge
+        public function find(string $nonce): ?Challenge
         {
             return $this->stored[$nonce] ?? null;
         }
@@ -285,13 +288,14 @@ it('honours a container-bound custom ChallengeStore', function (): void {
             if (! isset($this->stored[$nonce])) {
                 return false;
             }
+
             unset($this->stored[$nonce]);
 
             return true;
         }
     };
 
-    app()->instance(SanderMuller\SocialiteSolana\Contracts\ChallengeStore::class, $custom);
+    app()->instance(ChallengeStore::class, $custom);
 
     $kp = generateKeypair();
     $payload = provider()->buildChallengeFor($kp['publicKeyBase58']);
@@ -307,7 +311,7 @@ it('honours a container-bound custom ChallengeStore', function (): void {
 
     expect($custom->stored)->toBeEmpty();
 
-    app()->forgetInstance(SanderMuller\SocialiteSolana\Contracts\ChallengeStore::class);
+    app()->forgetInstance(ChallengeStore::class);
 });
 
 it('rejects the second of two concurrent verifies on the same nonce', function (): void {
@@ -329,7 +333,7 @@ it('rejects the second of two concurrent verifies on the same nonce', function (
 
     // Re-put the same challenge to simulate a state where the second worker had peeked
     // before the first worker's forget() ran. The second forget() must return false.
-    $store = app()->make(SanderMuller\SocialiteSolana\Stores\SessionChallengeStore::class, [
+    $store = app()->make(SessionChallengeStore::class, [
         'session' => app('session.store'),
     ]);
     // Now the nonce is gone — calling forget directly returns false.
@@ -338,18 +342,18 @@ it('rejects the second of two concurrent verifies on the same nonce', function (
 
 it('throws when ChallengeStore container binding resolves to the wrong type', function (): void {
     app()->instance(
-        SanderMuller\SocialiteSolana\Contracts\ChallengeStore::class,
+        ChallengeStore::class,
         new stdClass(),
     );
 
     try {
         provider()->buildChallengeFor(generateKeypair()['publicKeyBase58']);
         expect(false)->toBeTrue('expected LogicException');
-    } catch (LogicException $e) {
-        expect($e->getMessage())->toContain('Container binding for')
-            ->and($e->getMessage())->toContain('expected an instance of');
+    } catch (LogicException $logicException) {
+        expect($logicException->getMessage())->toContain('Container binding for')
+            ->and($logicException->getMessage())->toContain('expected an instance of');
     } finally {
-        app()->forgetInstance(SanderMuller\SocialiteSolana\Contracts\ChallengeStore::class);
+        app()->forgetInstance(ChallengeStore::class);
     }
 });
 

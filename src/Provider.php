@@ -3,6 +3,8 @@
 namespace SanderMuller\SocialiteSolana;
 
 use BadMethodCallException;
+use Illuminate\Contracts\Cache\Repository;
+use Illuminate\Contracts\Session\Session;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Support\Carbon;
@@ -10,6 +12,7 @@ use Illuminate\Support\Facades\Config;
 use Illuminate\Support\Str;
 use Laravel\Socialite\Two\AbstractProvider;
 use Laravel\Socialite\Two\User;
+use LogicException;
 use Override;
 use SanderMuller\SocialiteSolana\Contracts\ChallengeStore;
 use SanderMuller\SocialiteSolana\Exceptions\AddressMismatchException;
@@ -136,7 +139,7 @@ final class Provider extends AbstractProvider
         $store = $this->challengeStore();
         $challenge = $store->find($nonce);
 
-        if ($challenge === null) {
+        if (! $challenge instanceof Challenge) {
             throw new ChallengeNotFoundException('Authentication challenge expired or invalid.');
         }
 
@@ -157,11 +160,11 @@ final class Provider extends AbstractProvider
 
         try {
             $isValid = $parsed->verify($message, $signatureBytes);
-        } catch (SdkInvalidSignatureException $sdkException) {
+        } catch (SdkInvalidSignatureException $sdkInvalidSignatureException) {
             throw new InvalidSignatureException(
-                $sdkException->getMessage(),
-                $sdkException->getCode(),
-                previous: $sdkException,
+                $sdkInvalidSignatureException->getMessage(),
+                $sdkInvalidSignatureException->getCode(),
+                previous: $sdkInvalidSignatureException,
             );
         }
 
@@ -223,7 +226,7 @@ final class Provider extends AbstractProvider
         if ($container->bound(ChallengeStore::class)) {
             $resolved = $container->make(ChallengeStore::class);
             if (! $resolved instanceof ChallengeStore) {
-                throw new \LogicException(
+                throw new LogicException(
                     'Container binding for ' . ChallengeStore::class . ' resolved to ' . get_debug_type($resolved)
                     . '; expected an instance of ' . ChallengeStore::class . '.',
                 );
@@ -245,8 +248,8 @@ final class Provider extends AbstractProvider
     {
         $session = app('session.store');
 
-        if (! $session instanceof \Illuminate\Contracts\Session\Session) {
-            throw new \LogicException('Unable to resolve the Laravel session driver for SessionChallengeStore.');
+        if (! $session instanceof Session) {
+            throw new LogicException('Unable to resolve the Laravel session driver for SessionChallengeStore.');
         }
 
         return new SessionChallengeStore($session);
@@ -256,8 +259,8 @@ final class Provider extends AbstractProvider
     {
         $cache = app('cache.store');
 
-        if (! $cache instanceof \Illuminate\Contracts\Cache\Repository) {
-            throw new \LogicException('Unable to resolve the Laravel cache repository for CacheChallengeStore.');
+        if (! $cache instanceof Repository) {
+            throw new LogicException('Unable to resolve the Laravel cache repository for CacheChallengeStore.');
         }
 
         return new CacheChallengeStore($cache);
@@ -266,7 +269,7 @@ final class Provider extends AbstractProvider
     private function resolveStoreClass(string $class): ChallengeStore
     {
         if (! class_exists($class)) {
-            throw new \LogicException(
+            throw new LogicException(
                 "Configured services.solana.store '{$class}' is not a known store keyword (session|cache) and does not name an existing class.",
             );
         }
@@ -274,7 +277,7 @@ final class Provider extends AbstractProvider
         $resolved = app()->make($class);
 
         if (! $resolved instanceof ChallengeStore) {
-            throw new \LogicException(
+            throw new LogicException(
                 "Configured services.solana.store '{$class}' does not implement " . ChallengeStore::class . '.',
             );
         }
