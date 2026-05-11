@@ -133,31 +133,67 @@ Route::post('/auth/solana/callback', function () {
 ### Livewire component
 
 ```php
-use Livewire\Component;
 use Laravel\Socialite\Facades\Socialite;
+use Livewire\Component;
 use SanderMuller\SocialiteSolana\Exceptions\SolanaAuthException;
 
 class SolanaLogin extends Component
 {
-    public function challenge(string $publicKey): array
+    public string $walletAddress = '';
+
+    /**
+     * Issue a SIWS challenge. The JS layer should `$wire.set('walletAddress', pubkey)`
+     * before calling this so the component already knows the address when verify() fires.
+     */
+    public function requestSignInChallenge(string $publicKey): array
     {
         return Socialite::driver('solana')->buildChallengeFor($publicKey);
     }
 
-    public function verify(string $publicKey, string $signature, string $message, string $nonce): void
+    public function signIn(string $signature, string $message, string $nonce): void
     {
         try {
             $solanaUser = Socialite::driver('solana')->verifyCredentials(
-                $publicKey, $signature, $message, $nonce,
+                $this->walletAddress, $signature, $message, $nonce,
             );
         } catch (SolanaAuthException $e) {
-            $this->addError('wallet', $e->getMessage());
+            $this->addError('solana', $e->getMessage());
             return;
         }
 
         // ... resolve user, log in, redirect
     }
 }
+```
+
+On the JS side, a small `signMessageBase58()` helper wraps the wallet adapter call so consumers don't repeat `bs58.encode(signed.signature)` at every site:
+
+```js
+import bs58 from 'https://esm.sh/bs58@5.0.0';
+
+async function signMessageBase58(wallet, message) {
+    const encoded = new TextEncoder().encode(message);
+    const signed = await wallet.signMessage(encoded, 'utf8');
+    return bs58.encode(signed.signature);
+}
+
+await wallet.connect();
+$wire.set('walletAddress', wallet.publicKey.toBase58());
+
+const { message, nonce } = await $wire.call('requestSignInChallenge', wallet.publicKey.toBase58());
+const signature = await signMessageBase58(wallet, message);
+await $wire.call('signIn', signature, message, nonce);
+```
+
+For UX, sharing a single error surface between sync (server validation) and async (wallet/network) errors keeps the component simple:
+
+```blade
+<div x-data="{ error: null }">
+    <div x-show="error || $wire.__instance.errors?.solana" class="alert">
+        <span x-text="error"></span>
+        @error('solana') {{ $message }} @enderror
+    </div>
+</div>
 ```
 
 ### Granular error handling

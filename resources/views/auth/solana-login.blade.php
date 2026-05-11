@@ -13,13 +13,25 @@
 <script type="module">
     import bs58 from 'https://esm.sh/bs58@5.0.0';
 
+    /**
+     * Wraps wallet-adapter signMessage and returns the signature as a base58
+     * string. Drop this helper into your own JS to avoid re-encoding boilerplate
+     * at every callsite.
+     */
+    async function signMessageBase58(walletProvider, message) {
+        const encoded = new TextEncoder().encode(message);
+        const signed = await walletProvider.signMessage(encoded, 'utf8');
+
+        return bs58.encode(signed.signature);
+    }
+
     const button = document.getElementById('solana-login');
     const status = document.getElementById('status');
     const csrf = document.querySelector('meta[name="csrf-token"]').content;
 
-    const provider = window.solana;
+    const wallet = window.solana;
 
-    if (!provider?.isPhantom) {
+    if (!wallet?.isPhantom) {
         status.textContent = 'Phantom wallet not detected. Install: https://phantom.app';
     } else {
         button.disabled = false;
@@ -41,8 +53,8 @@
         status.textContent = 'Connecting wallet...';
 
         try {
-            await provider.connect();
-            const publicKey = provider.publicKey.toBase58();
+            await wallet.connect();
+            const publicKey = wallet.publicKey.toBase58();
 
             status.textContent = 'Requesting challenge...';
             const challengeRes = await post('/auth/solana/challenge', { publicKey });
@@ -52,12 +64,11 @@
             const { message, nonce } = await challengeRes.json();
 
             status.textContent = 'Awaiting signature in wallet...';
-            const encoded = new TextEncoder().encode(message);
-            const signed = await provider.signMessage(encoded, 'utf8');
+            const signature = await signMessageBase58(wallet, message);
 
             const result = await post('/auth/solana/callback', {
                 publicKey,
-                signature: bs58.encode(signed.signature),
+                signature,
                 message,
                 nonce,
             });

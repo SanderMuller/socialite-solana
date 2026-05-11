@@ -184,11 +184,22 @@ final class Provider extends AbstractProvider
         ]);
     }
 
+    /**
+     * HTTP wrapper around buildChallengeFor(). Reads `publicKey` from the
+     * request and returns the challenge as a JsonResponse. Use this from
+     * controller routes; use buildChallengeFor() directly from Livewire,
+     * queue jobs, or any other non-HTTP context.
+     */
     public function challenge(): JsonResponse
     {
         return response()->json($this->buildChallengeFor($this->stringInput('publicKey')));
     }
 
+    /**
+     * HTTP wrapper around verifyCredentials(). Reads `publicKey`, `signature`,
+     * `message`, and `nonce` from the request. Use this from controller routes;
+     * use verifyCredentials() directly from any non-HTTP context.
+     */
     #[Override]
     public function user(): User
     {
