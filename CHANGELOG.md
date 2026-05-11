@@ -2,6 +2,17 @@
 
 All notable changes to `sandermuller/socialite-solana` are documented here.
 
+## v0.1.1 - 2026-05-11
+
+### Added
+
+- **PSR-3 logger injection** via `Provider::setLogger(LoggerInterface)`. Each SIWS failure path logs a `warning` with the exception class in `context.exception` plus non-PII details (signature byte length, expiry delta, missing-param flags). Successful challenge issuance + signature verification log at `info`. Resolution: setter-supplied logger wins, otherwise a container-bound `LoggerInterface`, otherwise `NullLogger`. See README "Logging" for the per-event context table.
+- New explicit dependency: `psr/log: ^3.0` (already pulled transitively by Laravel).
+
+### Notes
+
+- No breaking changes. All existing API surface (HTTP wrappers, framework-agnostic methods, exception hierarchy, ChallengeStore contract) is unchanged.
+
 ## v0.1.0 - 2026-05-11
 
 Initial release. Adds a `solana` driver to [Laravel Socialite](https://laravel.com/docs/socialite) for [Sign-In With Solana](https://docs.phantom.app/solana/sign-in-with-solana) (SIWS / CAIP-122).

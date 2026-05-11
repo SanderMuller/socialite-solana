@@ -11,6 +11,7 @@ This package adds a `solana` driver to [Laravel Socialite](https://laravel.com/d
 - Typed exception hierarchy so callers can map each failure case to its own UX
 - Works from controllers, Livewire components, queue jobs, or console code — the HTTP wrappers are thin
 - Pluggable challenge storage — session-backed default, cache-backed for API / Sanctum bearer-token flows, or your own implementation
+- Optional PSR-3 logger injection for ops dashboards on failed-signature / expiry / malformed-input rates
 
 ## Requirements
 
@@ -248,6 +249,45 @@ interface ChallengeStore
     public function forget(string $nonce): void;
 }
 ```
+
+### Logging
+
+The Provider accepts a PSR-3 `LoggerInterface` so you can ship SIWS auth events to your observability stack — useful for dashboards on failed-signature count, expiry rate, malformed-pubkey rate, and the like.
+
+Resolution order:
+
+1. An instance passed via `setLogger()` wins.
+2. Otherwise a container-bound `Psr\Log\LoggerInterface` is used.
+3. Otherwise `NullLogger`.
+
+```php
+use Illuminate\Support\Facades\Log;
+use Laravel\Socialite\Facades\Socialite;
+
+// Per-call override:
+Socialite::driver('solana')->setLogger(Log::channel('security'))->user();
+
+// Or app-wide via container:
+// In a ServiceProvider::register()
+$this->app->bind(\Psr\Log\LoggerInterface::class, fn () => Log::channel('security'));
+```
+
+Each failure throws **and** logs a `warning` with the exception class in `context.exception` plus relevant non-PII details (signature byte length, expiry delta, missing-param flags). Successful challenge issuance and signature verification log at `info`.
+
+| Event | Level | Notable context |
+|---|---|---|
+| Challenge issued | `info` | `ttl_seconds` |
+| Verification succeeded | `info` | — |
+| Missing param on challenge / verify | `warning` | `exception`, `*_empty` flags |
+| Invalid public key | `warning` | `exception`, `input_length` |
+| Malformed / unknown nonce | `warning` | `exception`, `nonce_length`, `reason` |
+| Message mismatch | `warning` | `exception`, `stored_length`, `received_length` |
+| Address mismatch | `warning` | `exception` |
+| Challenge expired | `warning` | `exception`, `expired_seconds_ago` |
+| Invalid / malformed signature | `warning` | `exception`, `signature_byte_length` or `input_length` |
+| Nonce race lost | `warning` | `exception`, `reason: concurrent_consumption` |
+
+No public keys, signatures, or message contents are logged.
 
 ### Frontend (Phantom wallet)
 

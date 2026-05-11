@@ -14,6 +14,8 @@ use Laravel\Socialite\Two\AbstractProvider;
 use Laravel\Socialite\Two\User;
 use LogicException;
 use Override;
+use Psr\Log\LoggerInterface;
+use Psr\Log\NullLogger;
 use SanderMuller\SocialiteSolana\Contracts\ChallengeStore;
 use SanderMuller\SocialiteSolana\Exceptions\AddressMismatchException;
 use SanderMuller\SocialiteSolana\Exceptions\ChallengeExpiredException;
@@ -46,6 +48,21 @@ final class Provider extends AbstractProvider
      */
     protected $stateless = true;
 
+    private ?LoggerInterface $logger = null;
+
+    /**
+     * Inject a PSR-3 logger to capture per-exception SIWS auth events. Without
+     * this, the package falls back to a container-bound `LoggerInterface` if
+     * present, otherwise NullLogger. Useful for ops dashboards on failed-sig
+     * count, expiry rate, malformed-pubkey rate, etc.
+     */
+    public function setLogger(LoggerInterface $logger): self
+    {
+        $this->logger = $logger;
+
+        return $this;
+    }
+
     /**
      * @return list<string>
      */
@@ -71,6 +88,9 @@ final class Provider extends AbstractProvider
     public function buildChallengeFor(string $publicKey): array
     {
         if ($publicKey === '') {
+            $this->logger()->warning('SIWS: challenge requested without publicKey', [
+                'exception' => MissingChallengeParameterException::class,
+            ]);
             throw new MissingChallengeParameterException('publicKey is required to build the SIWS message.');
         }
 
@@ -113,6 +133,10 @@ final class Provider extends AbstractProvider
             expiresAt: $expiresAtTimestamp,
         ));
 
+        $this->logger()->info('SIWS: challenge issued', [
+            'ttl_seconds' => $ttl,
+        ]);
+
         return ['message' => $message, 'nonce' => $nonce];
     }
 
@@ -127,12 +151,24 @@ final class Provider extends AbstractProvider
         string $nonce,
     ): User {
         if ($publicKey === '' || $signature === '' || $message === '' || $nonce === '') {
+            $this->logger()->warning('SIWS: verify called with missing parameters', [
+                'exception' => MissingChallengeParameterException::class,
+                'publicKey_empty' => $publicKey === '',
+                'signature_empty' => $signature === '',
+                'message_empty' => $message === '',
+                'nonce_empty' => $nonce === '',
+            ]);
             throw new MissingChallengeParameterException(
                 'Missing required parameters: publicKey, signature, message, or nonce.',
             );
         }
 
         if (preg_match(self::NONCE_PATTERN, $nonce) !== 1) {
+            $this->logger()->warning('SIWS: malformed nonce', [
+                'exception' => ChallengeNotFoundException::class,
+                'nonce_length' => strlen($nonce),
+                'reason' => 'format_mismatch',
+            ]);
             throw new ChallengeNotFoundException('Authentication challenge expired or invalid.');
         }
 
@@ -140,18 +176,35 @@ final class Provider extends AbstractProvider
         $challenge = $store->find($nonce);
 
         if (! $challenge instanceof Challenge) {
+            $this->logger()->warning('SIWS: challenge not found for nonce', [
+                'exception' => ChallengeNotFoundException::class,
+                'reason' => 'store_miss',
+            ]);
             throw new ChallengeNotFoundException('Authentication challenge expired or invalid.');
         }
 
         if (! hash_equals($challenge->message, $message)) {
+            $this->logger()->warning('SIWS: signed message does not match stored challenge', [
+                'exception' => MessageMismatchException::class,
+                'stored_length' => strlen($challenge->message),
+                'received_length' => strlen($message),
+            ]);
             throw new MessageMismatchException('Signed message does not match expected message.');
         }
 
         if (! hash_equals($challenge->address, $publicKey)) {
+            $this->logger()->warning('SIWS: signer address does not match challenge address', [
+                'exception' => AddressMismatchException::class,
+            ]);
             throw new AddressMismatchException('Signer address does not match challenge address.');
         }
 
-        if ($challenge->hasExpired(Carbon::now()->getTimestamp())) {
+        $now = Carbon::now()->getTimestamp();
+        if ($challenge->hasExpired($now)) {
+            $this->logger()->warning('SIWS: challenge expired before verification', [
+                'exception' => ChallengeExpiredException::class,
+                'expired_seconds_ago' => $now - $challenge->expiresAt,
+            ]);
             throw new ChallengeExpiredException('Authentication challenge has expired.');
         }
 
@@ -161,6 +214,11 @@ final class Provider extends AbstractProvider
         try {
             $isValid = $parsed->verify($message, $signatureBytes);
         } catch (SdkInvalidSignatureException $sdkInvalidSignatureException) {
+            $this->logger()->warning('SIWS: signature length rejected by SDK', [
+                'exception' => InvalidSignatureException::class,
+                'signature_byte_length' => strlen($signatureBytes),
+                'sdk_message' => $sdkInvalidSignatureException->getMessage(),
+            ]);
             throw new InvalidSignatureException(
                 $sdkInvalidSignatureException->getMessage(),
                 $sdkInvalidSignatureException->getCode(),
@@ -169,14 +227,23 @@ final class Provider extends AbstractProvider
         }
 
         if (! $isValid) {
+            $this->logger()->warning('SIWS: signature did not verify against public key', [
+                'exception' => InvalidSignatureException::class,
+            ]);
             throw new InvalidSignatureException('Invalid signature.');
         }
 
         // Atomic claim: only one of N concurrent verifiers can be the one
         // that actually removes the nonce. Losers get false and bail out.
         if (! $store->forget($nonce)) {
+            $this->logger()->warning('SIWS: nonce already consumed (race)', [
+                'exception' => ChallengeNotFoundException::class,
+                'reason' => 'concurrent_consumption',
+            ]);
             throw new ChallengeNotFoundException('Authentication challenge has already been consumed.');
         }
+
+        $this->logger()->info('SIWS: verification succeeded', []);
 
         return $this->mapUserToObject([
             'publicKey' => $publicKey,
@@ -219,6 +286,27 @@ final class Provider extends AbstractProvider
      * takes precedence; otherwise the `services.solana.store` config value is
      * consulted (`session` default, `cache`, or a fully-qualified class name).
      */
+    /**
+     * Resolve the logger. Setter-supplied instance wins; otherwise check the
+     * container for a bound LoggerInterface; otherwise NullLogger.
+     */
+    private function logger(): LoggerInterface
+    {
+        if ($this->logger instanceof LoggerInterface) {
+            return $this->logger;
+        }
+
+        $container = app();
+        if ($container->bound(LoggerInterface::class)) {
+            $resolved = $container->make(LoggerInterface::class);
+            if ($resolved instanceof LoggerInterface) {
+                return $this->logger = $resolved;
+            }
+        }
+
+        return $this->logger = new NullLogger();
+    }
+
     private function challengeStore(): ChallengeStore
     {
         $container = app();
@@ -315,6 +403,11 @@ final class Provider extends AbstractProvider
         try {
             return PublicKey::from($value);
         } catch (Throwable $throwable) {
+            $this->logger()->warning('SIWS: invalid public key', [
+                'exception' => InvalidPublicKeyException::class,
+                'input_length' => strlen($value),
+                'sdk_message' => $throwable->getMessage(),
+            ]);
             throw new InvalidPublicKeyException(
                 'Invalid Solana public key: ' . $throwable->getMessage(),
                 $throwable->getCode(),
@@ -333,6 +426,10 @@ final class Provider extends AbstractProvider
 
         $decoded = base64_decode($value, true);
         if ($decoded === false) {
+            $this->logger()->warning('SIWS: signature is neither base58 nor base64', [
+                'exception' => InvalidSignatureException::class,
+                'input_length' => strlen($value),
+            ]);
             throw new InvalidSignatureException('Signature must be base58 or base64 encoded.');
         }
 

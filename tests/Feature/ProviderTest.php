@@ -3,6 +3,7 @@
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Session;
 use Laravel\Socialite\Facades\Socialite;
+use Psr\Log\LoggerInterface;
 use SanderMuller\SocialiteSolana\Challenge;
 use SanderMuller\SocialiteSolana\Contracts\ChallengeStore;
 use SanderMuller\SocialiteSolana\Exceptions\AddressMismatchException;
@@ -15,6 +16,7 @@ use SanderMuller\SocialiteSolana\Exceptions\MissingChallengeParameterException;
 use SanderMuller\SocialiteSolana\Exceptions\SolanaAuthException;
 use SanderMuller\SocialiteSolana\Provider;
 use SanderMuller\SocialiteSolana\Stores\SessionChallengeStore;
+use SanderMuller\SocialiteSolana\Tests\ArrayLogger;
 
 use function SanderMuller\SocialiteSolana\Tests\generateKeypair;
 use function SanderMuller\SocialiteSolana\Tests\signMessageBase58;
@@ -368,6 +370,95 @@ it('throws when services.solana.store names a class that does not implement the 
 
     provider()->buildChallengeFor(generateKeypair()['publicKeyBase58']);
 })->throws(LogicException::class, 'does not implement');
+
+it('logs successful challenge issuance at info level', function (): void {
+    $logger = new ArrayLogger();
+    $kp = generateKeypair();
+
+    provider()->setLogger($logger)->buildChallengeFor($kp['publicKeyBase58']);
+
+    expect($logger->records)->toHaveCount(1)
+        ->and($logger->records[0]['level'])->toBe('info')
+        ->and($logger->records[0]['message'])->toBe('SIWS: challenge issued')
+        ->and($logger->records[0]['context'])->toHaveKey('ttl_seconds');
+});
+
+it('logs each failure path with the exception class in context', function (): void {
+    $cases = [
+        ['name' => 'missing param', 'run' => fn (Provider $p) => $p->buildChallengeFor(''), 'exception' => MissingChallengeParameterException::class],
+        ['name' => 'invalid pubkey', 'run' => fn (Provider $p) => $p->buildChallengeFor('not-a-real-pubkey'), 'exception' => InvalidPublicKeyException::class],
+        ['name' => 'malformed nonce', 'run' => fn (Provider $p) => $p->verifyCredentials('A', 'B', 'C', 'too-short'), 'exception' => ChallengeNotFoundException::class],
+    ];
+
+    foreach ($cases as $case) {
+        $logger = new ArrayLogger();
+        try {
+            $case['run'](provider()->setLogger($logger));
+            expect(false)->toBeTrue("expected {$case['name']} to throw");
+        } catch (InvalidArgumentException) {
+            // expected
+        }
+
+        expect($logger->recordsWithException($case['exception']))->not->toBeEmpty();
+    }
+});
+
+it('logs successful verification at info level', function (): void {
+    $logger = new ArrayLogger();
+    $kp = generateKeypair();
+    $payload = provider()->buildChallengeFor($kp['publicKeyBase58']);
+
+    provider()->setLogger($logger)->verifyCredentials(
+        publicKey: $kp['publicKeyBase58'],
+        signature: signMessageBase58($payload['message'], $kp['secretKey']),
+        message: $payload['message'],
+        nonce: $payload['nonce'],
+    );
+
+    $success = array_filter($logger->records, fn (array $r) => $r['message'] === 'SIWS: verification succeeded');
+    expect($success)->not->toBeEmpty();
+});
+
+it('logs an invalid signature attempt as warning with byte length context', function (): void {
+    $logger = new ArrayLogger();
+    $kp = generateKeypair();
+    $imposter = generateKeypair();
+    $payload = provider()->buildChallengeFor($kp['publicKeyBase58']);
+
+    try {
+        provider()->setLogger($logger)->verifyCredentials(
+            publicKey: $kp['publicKeyBase58'],
+            signature: signMessageBase58($payload['message'], $imposter['secretKey']),
+            message: $payload['message'],
+            nonce: $payload['nonce'],
+        );
+    } catch (InvalidSignatureException) {
+        // expected
+    }
+
+    $entry = $logger->recordsWithException(InvalidSignatureException::class)[0] ?? null;
+    expect($entry)->not->toBeNull()
+        ->and($entry['level'])->toBe('warning');
+});
+
+it('uses NullLogger when no logger is set or bound — no exceptions thrown', function (): void {
+    $kp = generateKeypair();
+    $result = provider()->buildChallengeFor($kp['publicKeyBase58']);
+
+    expect($result)->toHaveKeys(['message', 'nonce']);
+});
+
+it('resolves a container-bound LoggerInterface when no explicit setLogger', function (): void {
+    $logger = new ArrayLogger();
+    app()->instance(LoggerInterface::class, $logger);
+
+    $kp = generateKeypair();
+    provider()->buildChallengeFor($kp['publicKeyBase58']);
+
+    expect($logger->records)->not->toBeEmpty();
+
+    app()->forgetInstance(LoggerInterface::class);
+});
 
 it('every exception subclass extends SolanaAuthException and \\InvalidArgumentException', function (): void {
     foreach ([
