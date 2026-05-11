@@ -264,15 +264,29 @@ Resolution order:
 2. Otherwise a container-bound `Psr\Log\LoggerInterface` is used.
 3. Otherwise `NullLogger`.
 
+The **recommended pattern is a scoped `setLogger()` call inside a small helper**, not a global container binding. The Socialite manager memoizes drivers, so calling `setLogger()` on `Socialite::driver('solana')` once per request is idempotent across `challenge()` / `user()` / `buildChallengeFor()` / `verifyCredentials()` invocations:
+
 ```php
 use Illuminate\Support\Facades\Log;
 use Laravel\Socialite\Facades\Socialite;
+use SanderMuller\SocialiteSolana\Provider;
 
-// Per-call override:
-Socialite::driver('solana')->setLogger(Log::channel('security'))->user();
+private function solanaProvider(): Provider
+{
+    $provider = Socialite::driver('solana');
+    assert($provider instanceof Provider);
 
-// Or app-wide via container:
-// In a ServiceProvider::register()
+    $provider->setLogger(Log::channel('security'));
+
+    return $provider;
+}
+```
+
+> [!WARNING]
+> Binding `Psr\Log\LoggerInterface` globally in the container works, but it swaps the default logger for **every** package that resolves that contract — including Laravel internals — which is a wide blast radius for one provider's worth of observability. Prefer the scoped helper pattern above unless you genuinely want the routing to apply package-wide.
+
+```php
+// Avoid unless you actually want the routing to be app-wide:
 $this->app->bind(\Psr\Log\LoggerInterface::class, fn () => Log::channel('security'));
 ```
 
