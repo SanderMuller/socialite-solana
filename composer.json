@@ -21,13 +21,13 @@
     "laravel/framework": "^11.0|^12.0|^13.0",
     "laravel/socialite": "^5.0",
     "sandermuller/solana-pubkey": "dev-main",
-    "socialiteproviders/manager": "^4.8"
+    "socialiteproviders/manager": "^4.9.2"
   },
   "require-dev": {
     "laravel/pint": "^1.29",
     "mrpunyapal/rector-pest": "^0.2.7",
     "nikic/php-parser": "^5.4",
-    "orchestra/testbench": "^9.0||^10.11||^11.0",
+    "orchestra/testbench": "^11.0",
     "pestphp/pest": "^3.0||^4.4",
     "phpstan/extension-installer": "^1.4",
     "phpstan/phpstan": "^2.0",
