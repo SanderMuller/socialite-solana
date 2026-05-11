@@ -11,6 +11,7 @@ use SanderMuller\SocialiteSolana\Exceptions\ChallengeExpiredException;
 use SanderMuller\SocialiteSolana\Exceptions\ChallengeNotFoundException;
 use SanderMuller\SocialiteSolana\Exceptions\InvalidPublicKeyException;
 use SanderMuller\SocialiteSolana\Exceptions\InvalidSignatureException;
+use SanderMuller\SocialiteSolana\Exceptions\MalformedSignatureException;
 use SanderMuller\SocialiteSolana\Exceptions\MessageMismatchException;
 use SanderMuller\SocialiteSolana\Exceptions\MissingChallengeParameterException;
 use SanderMuller\SocialiteSolana\Exceptions\SolanaAuthException;
@@ -460,6 +461,86 @@ it('resolves a container-bound LoggerInterface when no explicit setLogger', func
     app()->forgetInstance(LoggerInterface::class);
 });
 
+it('classifies a non-decodable signature as MalformedSignatureException', function (): void {
+    $kp = generateKeypair();
+    $payload = provider()->buildChallengeFor($kp['publicKeyBase58']);
+
+    provider()->verifyCredentials(
+        publicKey: $kp['publicKeyBase58'],
+        signature: '@@@not-base58-or-base64@@@',
+        message: $payload['message'],
+        nonce: $payload['nonce'],
+    );
+})->throws(MalformedSignatureException::class);
+
+it('classifies a wrong-length decoded signature as MalformedSignatureException', function (): void {
+    $kp = generateKeypair();
+    $payload = provider()->buildChallengeFor($kp['publicKeyBase58']);
+
+    // 32 bytes (a pubkey-sized blob), valid base58, but not 64 → SDK rejects on length
+    provider()->verifyCredentials(
+        publicKey: $kp['publicKeyBase58'],
+        signature: $kp['publicKeyBase58'],
+        message: $payload['message'],
+        nonce: $payload['nonce'],
+    );
+})->throws(MalformedSignatureException::class);
+
+it('still classifies a correctly-shaped-but-wrong-signer signature as InvalidSignatureException only', function (): void {
+    $kp = generateKeypair();
+    $imposter = generateKeypair();
+    $payload = provider()->buildChallengeFor($kp['publicKeyBase58']);
+
+    try {
+        provider()->verifyCredentials(
+            publicKey: $kp['publicKeyBase58'],
+            signature: signMessageBase58($payload['message'], $imposter['secretKey']),
+            message: $payload['message'],
+            nonce: $payload['nonce'],
+        );
+        expect(false)->toBeTrue('expected throw');
+    } catch (InvalidSignatureException $invalidSignatureException) {
+        // Must be the parent class exactly, NOT MalformedSignatureException
+        expect($invalidSignatureException)->not->toBeInstanceOf(MalformedSignatureException::class);
+    }
+});
+
+it('catch InvalidSignatureException still catches MalformedSignatureException (additive)', function (): void {
+    $kp = generateKeypair();
+    $payload = provider()->buildChallengeFor($kp['publicKeyBase58']);
+
+    try {
+        provider()->verifyCredentials(
+            publicKey: $kp['publicKeyBase58'],
+            signature: '@@@not-base58-or-base64@@@',
+            message: $payload['message'],
+            nonce: $payload['nonce'],
+        );
+        expect(false)->toBeTrue('expected throw');
+    } catch (InvalidSignatureException $invalidSignatureException) {
+        expect($invalidSignatureException)->toBeInstanceOf(MalformedSignatureException::class);
+    }
+});
+
+it('logs MalformedSignatureException class in context for non-decodable signature', function (): void {
+    $logger = new ArrayLogger();
+    $kp = generateKeypair();
+    $payload = provider()->buildChallengeFor($kp['publicKeyBase58']);
+
+    try {
+        provider()->setLogger($logger)->verifyCredentials(
+            publicKey: $kp['publicKeyBase58'],
+            signature: '@@@not-base58-or-base64@@@',
+            message: $payload['message'],
+            nonce: $payload['nonce'],
+        );
+    } catch (MalformedSignatureException) {
+        // expected
+    }
+
+    expect($logger->recordsWithException(MalformedSignatureException::class))->not->toBeEmpty();
+});
+
 it('every exception subclass extends SolanaAuthException and \\InvalidArgumentException', function (): void {
     foreach ([
         MissingChallengeParameterException::class,
@@ -469,6 +550,7 @@ it('every exception subclass extends SolanaAuthException and \\InvalidArgumentEx
         MessageMismatchException::class,
         AddressMismatchException::class,
         InvalidSignatureException::class,
+        MalformedSignatureException::class,
     ] as $class) {
         expect(is_subclass_of($class, SolanaAuthException::class))->toBeTrue();
         expect(is_subclass_of($class, InvalidArgumentException::class))->toBeTrue();

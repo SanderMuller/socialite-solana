@@ -199,6 +199,7 @@ use SanderMuller\SocialiteSolana\Exceptions\ChallengeExpiredException;
 use SanderMuller\SocialiteSolana\Exceptions\ChallengeNotFoundException;
 use SanderMuller\SocialiteSolana\Exceptions\InvalidPublicKeyException;
 use SanderMuller\SocialiteSolana\Exceptions\InvalidSignatureException;
+use SanderMuller\SocialiteSolana\Exceptions\MalformedSignatureException;
 use SanderMuller\SocialiteSolana\Exceptions\MessageMismatchException;
 use SanderMuller\SocialiteSolana\Exceptions\MissingChallengeParameterException;
 
@@ -212,8 +213,11 @@ try {
     return back()->withErrors(['wallet' => 'That wallet address is not a valid Solana public key.']);
 } catch (MessageMismatchException | AddressMismatchException) {
     abort(400, 'Tampered request.'); // Wallet signed something the server did not issue — usually a bug, occasionally an attack.
+} catch (MalformedSignatureException) {
+    // Wallet returned a signature that's not 64 raw bytes — extension bug or wrong wallet. Catch BEFORE InvalidSignatureException.
+    return back()->withErrors(['wallet' => 'Your wallet did not return a valid signature. Try a different wallet or reconnect.']);
 } catch (InvalidSignatureException) {
-    return back()->withErrors(['wallet' => 'Could not verify the signature. Please try again.']);
+    return back()->withErrors(['wallet' => 'Signature did not match. The user may have switched wallets mid-flow. Please try again.']);
 }
 ```
 
@@ -284,7 +288,8 @@ Each failure throws **and** logs a `warning` with the exception class in `contex
 | Message mismatch | `warning` | `exception`, `stored_length`, `received_length` |
 | Address mismatch | `warning` | `exception` |
 | Challenge expired | `warning` | `exception`, `expired_seconds_ago` |
-| Invalid / malformed signature | `warning` | `exception`, `signature_byte_length` or `input_length` |
+| Malformed signature (undecodable or wrong length) | `warning` | `exception` = `MalformedSignatureException`, `signature_byte_length` or `input_length` |
+| Invalid signature (verify returned false) | `warning` | `exception` = `InvalidSignatureException` |
 | Nonce race lost | `warning` | `exception`, `reason: concurrent_consumption` |
 
 No public keys, signatures, or message contents are logged.

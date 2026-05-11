@@ -22,6 +22,7 @@ use SanderMuller\SocialiteSolana\Exceptions\ChallengeExpiredException;
 use SanderMuller\SocialiteSolana\Exceptions\ChallengeNotFoundException;
 use SanderMuller\SocialiteSolana\Exceptions\InvalidPublicKeyException;
 use SanderMuller\SocialiteSolana\Exceptions\InvalidSignatureException;
+use SanderMuller\SocialiteSolana\Exceptions\MalformedSignatureException;
 use SanderMuller\SocialiteSolana\Exceptions\MessageMismatchException;
 use SanderMuller\SocialiteSolana\Exceptions\MissingChallengeParameterException;
 use SanderMuller\SocialiteSolana\Stores\CacheChallengeStore;
@@ -215,11 +216,11 @@ final class Provider extends AbstractProvider
             $isValid = $parsed->verify($message, $signatureBytes);
         } catch (SdkInvalidSignatureException $sdkInvalidSignatureException) {
             $this->logger()->warning('SIWS: signature length rejected by SDK', [
-                'exception' => InvalidSignatureException::class,
+                'exception' => MalformedSignatureException::class,
                 'signature_byte_length' => strlen($signatureBytes),
                 'sdk_message' => $sdkInvalidSignatureException->getMessage(),
             ]);
-            throw new InvalidSignatureException(
+            throw new MalformedSignatureException(
                 $sdkInvalidSignatureException->getMessage(),
                 $sdkInvalidSignatureException->getCode(),
                 previous: $sdkInvalidSignatureException,
@@ -427,10 +428,10 @@ final class Provider extends AbstractProvider
         $decoded = base64_decode($value, true);
         if ($decoded === false) {
             $this->logger()->warning('SIWS: signature is neither base58 nor base64', [
-                'exception' => InvalidSignatureException::class,
+                'exception' => MalformedSignatureException::class,
                 'input_length' => strlen($value),
             ]);
-            throw new InvalidSignatureException('Signature must be base58 or base64 encoded.');
+            throw new MalformedSignatureException('Signature must be base58 or base64 encoded.');
         }
 
         return $decoded;

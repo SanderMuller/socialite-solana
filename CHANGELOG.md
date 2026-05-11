@@ -2,6 +2,21 @@
 
 All notable changes to `sandermuller/socialite-solana` are documented here.
 
+## v0.1.2 - 2026-05-11
+
+### Added
+
+- **`MalformedSignatureException`** under `SanderMuller\SocialiteSolana\Exceptions\`. Thrown when the submitted signature can't be base58/base64-decoded or decodes to the wrong byte length — i.e. the wallet did not produce a valid 64-byte Ed25519 signature blob. The "decoded fine but verification failed" case continues to throw `InvalidSignatureException`. This lets consumers split UX: malformed → "try a different wallet"; invalid → "user switched wallets mid-flow / signature does not match".
+
+### Backward compatibility
+
+- **Non-breaking.** `MalformedSignatureException extends InvalidSignatureException`, so existing `catch (InvalidSignatureException)` blocks continue to catch every malformed case unchanged. Consumers that want the distinction simply add a `catch (MalformedSignatureException)` clause *before* their existing `catch (InvalidSignatureException)` block.
+- `InvalidSignatureException` is no longer `final`. No other API surface changed.
+
+### Logging
+
+- The malformed-signature paths now emit `context.exception = MalformedSignatureException::class` (was `InvalidSignatureException::class` previously). Verify-false continues to emit `InvalidSignatureException`. Ops dashboards filtering on the class string in `context.exception` may want to add a separate counter for the malformed case.
+
 ## v0.1.1 - 2026-05-11
 
 ### Added

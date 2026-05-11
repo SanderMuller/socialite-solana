@@ -3,7 +3,12 @@
 namespace SanderMuller\SocialiteSolana\Exceptions;
 
 /**
- * Thrown when the signature is malformed (wrong length, invalid encoding)
- * or fails Ed25519 verification against the public key and message.
+ * Thrown when an Ed25519 signature, parsed and length-valid, fails to verify
+ * against the public key and signed message.
+ *
+ * The "malformed" sub-case (signature can't be decoded as base58/base64, or
+ * decoded but wrong byte length) is reported via the {@see MalformedSignatureException}
+ * subclass so consumers that want to split UX can do so; consumers that catch
+ * this class continue to catch both cases.
  */
-final class InvalidSignatureException extends SolanaAuthException {}
+class InvalidSignatureException extends SolanaAuthException {}
