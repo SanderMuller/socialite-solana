@@ -1,0 +1,45 @@
+name: PHPStan
+
+permissions:
+  contents: read
+
+on:
+  # No path filter on `push` — every commit to main must be
+  # CI-validated so the pre-release green-light gate has evidence
+  # for docs-only release commits (README updates, etc.). Path
+  # filters stay on `pull_request` to skip CI cycles on docs-only
+  # PRs.
+  push:
+  pull_request:
+    paths:
+      - '**.php'
+      - 'phpstan.neon.dist'
+      - 'phpstan-baseline.neon'
+      - '.github/workflows/phpstan.yml'
+
+jobs:
+  phpstan:
+    name: phpstan
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          coverage: none
+
+      - name: Install composer dependencies
+        uses: ramsey/composer-install@v4
+
+      - name: Cache PHPStan results
+        uses: actions/cache@v5
+        with:
+          path: .cache/phpstan/
+          key: phpstan-result-cache-${{ hashFiles('composer.lock', 'phpstan.neon.dist') }}
+          restore-keys: phpstan-result-cache-
+
+      - name: Run PHPStan
+        run: ./vendor/bin/phpstan --error-format=github --no-interaction

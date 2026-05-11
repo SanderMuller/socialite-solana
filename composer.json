@@ -1,0 +1,80 @@
+{
+  "name": "sandermuller/socialite-solana",
+  "description": "A Laravel Socialite provider for Solana wallet sign-in (Sign-In With Solana).",
+  "license": "MIT",
+  "keywords": ["laravel", "socialite", "solana", "wallet", "siws", "auth"],
+  "authors": [
+    {
+      "name": "Sander Muller",
+      "email": "sander@hihaho.com"
+    }
+  ],
+  "repositories": [
+    {
+      "type": "vcs",
+      "url": "https://github.com/collectiq/solana-php-sdk"
+    }
+  ],
+  "require": {
+    "php": "^8.4",
+    "ext-sodium": "*",
+    "collectiq/solana-php-sdk": "dev-main",
+    "laravel/framework": "^11.0|^12.0|^13.0",
+    "laravel/socialite": "^5.0",
+    "socialiteproviders/manager": "^4.8"
+  },
+  "require-dev": {
+    "laravel/pint": "^1.29",
+    "mrpunyapal/rector-pest": "^0.2.7",
+    "nikic/php-parser": "^5.4",
+    "orchestra/testbench": "^9.0||^10.11||^11.0",
+    "pestphp/pest": "^3.0||^4.4",
+    "phpstan/extension-installer": "^1.4",
+    "phpstan/phpstan": "^2.0",
+    "phpstan/phpstan-strict-rules": "^2.0",
+    "rector/rector": "^2.4.1",
+    "rector/type-perfect": "^2.0",
+    "sandermuller/package-boost": "^0.15.0",
+    "spaze/phpstan-disallowed-calls": "^4.10",
+    "symplify/phpstan-extensions": "^12.0",
+    "tomasvotruba/cognitive-complexity": "^1.0",
+    "tomasvotruba/type-coverage": "^2.0",
+    "stolt/lean-package-validator": "^5.7.1"
+  },
+  "autoload": {
+    "psr-4": {
+      "SanderMuller\\SocialiteSolana\\": "src/"
+    }
+  },
+  "autoload-dev": {
+    "psr-4": {
+      "SanderMuller\\SocialiteSolana\\Tests\\": "tests/"
+    },
+    "files": [
+      "tests/Helpers.php"
+    ]
+  },
+  "scripts": {
+    "phpstan": "vendor/bin/phpstan analyse --memory-limit=2G",
+    "phpstan-simplified": "vendor/bin/phpstan analyse --memory-limit=2G --error-format symplify",
+    "phpstan-clear-cache": "vendor/bin/phpstan clear-result-cache",
+    "format": "vendor/bin/pint",
+    "rector": "vendor/bin/rector process",
+    "test": "vendor/bin/pest",
+    "test-coverage": "vendor/bin/pest --coverage",
+    "sync-ai": "vendor/bin/testbench package-boost:sync",
+    "qa": [
+      "@rector",
+      "@format",
+      "@phpstan-simplified"
+    ]
+  },
+  "minimum-stability": "dev",
+  "prefer-stable": true,
+  "config": {
+    "allow-plugins": {
+      "pestphp/pest-plugin": true,
+      "phpstan/extension-installer": true
+    }
+  }
+}
