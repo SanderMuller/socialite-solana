@@ -14,7 +14,7 @@ This package adds a `solana` driver to [Laravel Socialite](https://laravel.com/d
 
 ## Requirements
 
-PHP 8.4+ and Laravel 11, 12, or 13. The `ext-sodium` PHP extension must be enabled.
+PHP 8.3+ and Laravel 11, 12, or 13. The `ext-sodium` PHP extension must be enabled.
 
 ## Installation
 
