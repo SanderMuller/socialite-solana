@@ -3,19 +3,28 @@
 namespace SanderMuller\SocialiteSolana;
 
 use BadMethodCallException;
-use Collectiq\SolanaPhpSdk\Exceptions\InputValidationException;
-use Collectiq\SolanaPhpSdk\PublicKey;
-use Collectiq\SolanaPhpSdk\Util\Buffer;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Support\Carbon;
-use Illuminate\Support\Facades\Session;
+use Illuminate\Support\Facades\Config;
 use Illuminate\Support\Str;
-use InvalidArgumentException;
-use Laravel\Socialite\Contracts\User as UserContract;
 use Laravel\Socialite\Two\AbstractProvider;
 use Laravel\Socialite\Two\User;
 use Override;
+use SanderMuller\SocialiteSolana\Contracts\ChallengeStore;
+use SanderMuller\SocialiteSolana\Exceptions\AddressMismatchException;
+use SanderMuller\SocialiteSolana\Exceptions\ChallengeExpiredException;
+use SanderMuller\SocialiteSolana\Exceptions\ChallengeNotFoundException;
+use SanderMuller\SocialiteSolana\Exceptions\InvalidPublicKeyException;
+use SanderMuller\SocialiteSolana\Exceptions\InvalidSignatureException;
+use SanderMuller\SocialiteSolana\Exceptions\MessageMismatchException;
+use SanderMuller\SocialiteSolana\Exceptions\MissingChallengeParameterException;
+use SanderMuller\SocialiteSolana\Stores\CacheChallengeStore;
+use SanderMuller\SocialiteSolana\Stores\SessionChallengeStore;
+use SanderMuller\SolanaPubkey\Base58;
+use SanderMuller\SolanaPubkey\Exceptions\InvalidBase58Exception;
+use SanderMuller\SolanaPubkey\Exceptions\InvalidSignatureException as SdkInvalidSignatureException;
+use SanderMuller\SolanaPubkey\PublicKey;
 use SocialiteProviders\Manager\ConfigTrait;
 use Throwable;
 
@@ -25,8 +34,13 @@ final class Provider extends AbstractProvider
 
     public const string IDENTIFIER = 'SOLANA';
 
-    private const string SESSION_KEY_PREFIX = 'solana_auth_challenge:';
+    private const string NONCE_PATTERN = '/^[A-Za-z0-9]{32}$/';
 
+    /**
+     * Disables Socialite's OAuth `state` parameter, which is irrelevant to SIWS.
+     * Challenge storage is delegated to ChallengeStore — by default that's a
+     * session-backed store, but a cache-backed store ships for headless flows.
+     */
     protected $stateless = true;
 
     /**
@@ -34,7 +48,7 @@ final class Provider extends AbstractProvider
      */
     public static function additionalConfigKeys(): array
     {
-        return ['domain', 'uri', 'statement', 'chain', 'ttl', 'resources'];
+        return ['domain', 'uri', 'statement', 'chain', 'ttl', 'resources', 'store'];
     }
 
     #[Override]
@@ -45,32 +59,40 @@ final class Provider extends AbstractProvider
         );
     }
 
-    public function challenge(): JsonResponse
+    /**
+     * Build a SIWS challenge for the given wallet address. Framework-agnostic — does
+     * not read from the HTTP request. Useful for Livewire, queue jobs, or console code.
+     *
+     * @return array{message: string, nonce: string}
+     */
+    public function buildChallengeFor(string $publicKey): array
     {
-        $address = $this->stringInput('publicKey');
-
-        if ($address === '') {
-            throw new InvalidArgumentException('publicKey is required to build the SIWS message.');
+        if ($publicKey === '') {
+            throw new MissingChallengeParameterException('publicKey is required to build the SIWS message.');
         }
 
-        $this->parsePublicKey($address);
+        $this->parsePublicKey($publicKey);
 
         $cfg = $this->solanaConfig();
         $appUrl = $this->appUrl();
         $domain = $this->stringFromConfig($cfg, 'domain', '');
         if ($domain === '') {
             $host = parse_url($appUrl, PHP_URL_HOST);
-            $domain = is_string($host) && $host !== '' ? $host : $this->request->getHost();
+            // No $this->request fallback — buildChallengeFor() is called from
+            // Livewire / queue / console where the resolved request has no
+            // meaningful host. Set services.solana.domain explicitly in prod.
+            $domain = is_string($host) && $host !== '' ? $host : 'localhost';
         }
 
         $nonce = Str::random(32);
         $issuedAt = Carbon::now();
-        $ttl = max(60, $this->intFromConfig($cfg, 'ttl', 600));
+        $ttl = max(60, $this->intFromConfig($cfg, 'ttl', 180));
         $expiresAt = $issuedAt->copy()->addSeconds($ttl);
+        $expiresAtTimestamp = $expiresAt->getTimestamp();
 
         $message = (new SignInMessage(
             domain: $domain,
-            address: $address,
+            address: $publicKey,
             statement: $this->nullableStringFromConfig($cfg, 'statement'),
             uri: $this->stringFromConfig($cfg, 'uri', $appUrl),
             version: '1',
@@ -81,97 +103,194 @@ final class Provider extends AbstractProvider
             resources: $this->resourcesFromConfig($cfg),
         ))->toString();
 
-        Session::put(self::SESSION_KEY_PREFIX . $nonce, [
-            'message' => $message,
-            'address' => $address,
-            'expires_at' => $expiresAt->timestamp,
-        ]);
+        $this->challengeStore()->put(new Challenge(
+            nonce: $nonce,
+            message: $message,
+            address: $publicKey,
+            expiresAt: $expiresAtTimestamp,
+        ));
 
-        return response()->json([
-            'message' => $message,
-            'nonce' => $nonce,
-        ]);
+        return ['message' => $message, 'nonce' => $nonce];
     }
 
-    #[Override]
-    public function user(): UserContract
-    {
-        $publicKey = $this->stringInput('publicKey');
-        $signature = $this->stringInput('signature');
-        $signedMessage = $this->stringInput('message');
-        $nonce = $this->stringInput('nonce');
-
-        if ($publicKey === '' || $signature === '' || $signedMessage === '' || $nonce === '') {
-            throw new InvalidArgumentException('Missing required parameters: publicKey, signature, message, or nonce.');
+    /**
+     * Verify a SIWS signature and return the authenticated user. Framework-agnostic —
+     * does not read from the HTTP request.
+     */
+    public function verifyCredentials(
+        string $publicKey,
+        string $signature,
+        string $message,
+        string $nonce,
+    ): User {
+        if ($publicKey === '' || $signature === '' || $message === '' || $nonce === '') {
+            throw new MissingChallengeParameterException(
+                'Missing required parameters: publicKey, signature, message, or nonce.',
+            );
         }
 
-        $sessionKey = self::SESSION_KEY_PREFIX . $nonce;
-        $challenge = Session::get($sessionKey);
-
-        if (! is_array($challenge)
-            || ! isset($challenge['message'], $challenge['address'], $challenge['expires_at'])
-            || ! is_string($challenge['message'])
-            || ! is_string($challenge['address'])
-            || ! is_int($challenge['expires_at'])
-        ) {
-            throw new InvalidArgumentException('Authentication challenge expired or invalid.');
+        if (preg_match(self::NONCE_PATTERN, $nonce) !== 1) {
+            throw new ChallengeNotFoundException('Authentication challenge expired or invalid.');
         }
 
-        if (! hash_equals($challenge['message'], $signedMessage)) {
-            throw new InvalidArgumentException('Signed message does not match expected message.');
+        $store = $this->challengeStore();
+        $challenge = $store->find($nonce);
+
+        if ($challenge === null) {
+            throw new ChallengeNotFoundException('Authentication challenge expired or invalid.');
         }
 
-        if (! hash_equals($challenge['address'], $publicKey)) {
-            throw new InvalidArgumentException('Signer address does not match challenge address.');
+        if (! hash_equals($challenge->message, $message)) {
+            throw new MessageMismatchException('Signed message does not match expected message.');
         }
 
-        if (Carbon::now()->timestamp > $challenge['expires_at']) {
-            throw new InvalidArgumentException('Authentication challenge has expired.');
+        if (! hash_equals($challenge->address, $publicKey)) {
+            throw new AddressMismatchException('Signer address does not match challenge address.');
         }
 
-        $pubkey = $this->parsePublicKey($publicKey);
+        if ($challenge->hasExpired(Carbon::now()->getTimestamp())) {
+            throw new ChallengeExpiredException('Authentication challenge has expired.');
+        }
+
+        $parsed = $this->parsePublicKey($publicKey);
         $signatureBytes = $this->decodeSignature($signature);
 
         try {
-            $isValid = $pubkey->verify($signedMessage, $signatureBytes);
-        } catch (InputValidationException $inputValidationException) {
-            throw new InvalidArgumentException(
-                $inputValidationException->getMessage(),
-                $inputValidationException->getCode(),
-                previous: $inputValidationException,
+            $isValid = $parsed->verify($message, $signatureBytes);
+        } catch (SdkInvalidSignatureException $sdkException) {
+            throw new InvalidSignatureException(
+                $sdkException->getMessage(),
+                $sdkException->getCode(),
+                previous: $sdkException,
             );
         }
 
         if (! $isValid) {
-            throw new InvalidArgumentException('Invalid signature.');
+            throw new InvalidSignatureException('Invalid signature.');
         }
 
-        Session::forget($sessionKey);
+        // Atomic claim: only one of N concurrent verifiers can be the one
+        // that actually removes the nonce. Losers get false and bail out.
+        if (! $store->forget($nonce)) {
+            throw new ChallengeNotFoundException('Authentication challenge has already been consumed.');
+        }
 
         return $this->mapUserToObject([
             'publicKey' => $publicKey,
-            'message' => $signedMessage,
+            'publicKey_parsed' => $parsed,
+            'message' => $message,
             'signature' => $signature,
             'nonce' => $nonce,
         ]);
+    }
+
+    public function challenge(): JsonResponse
+    {
+        return response()->json($this->buildChallengeFor($this->stringInput('publicKey')));
+    }
+
+    #[Override]
+    public function user(): User
+    {
+        return $this->verifyCredentials(
+            publicKey: $this->stringInput('publicKey'),
+            signature: $this->stringInput('signature'),
+            message: $this->stringInput('message'),
+            nonce: $this->stringInput('nonce'),
+        );
+    }
+
+    /**
+     * Resolve the ChallengeStore. A container binding for ChallengeStore::class
+     * takes precedence; otherwise the `services.solana.store` config value is
+     * consulted (`session` default, `cache`, or a fully-qualified class name).
+     */
+    private function challengeStore(): ChallengeStore
+    {
+        $container = app();
+
+        if ($container->bound(ChallengeStore::class)) {
+            $resolved = $container->make(ChallengeStore::class);
+            if (! $resolved instanceof ChallengeStore) {
+                throw new \LogicException(
+                    'Container binding for ' . ChallengeStore::class . ' resolved to ' . get_debug_type($resolved)
+                    . '; expected an instance of ' . ChallengeStore::class . '.',
+                );
+            }
+
+            return $resolved;
+        }
+
+        $choice = $this->stringFromConfig($this->solanaConfig(), 'store', 'session');
+
+        return match ($choice) {
+            'session' => $this->buildSessionStore(),
+            'cache' => $this->buildCacheStore(),
+            default => $this->resolveStoreClass($choice),
+        };
+    }
+
+    private function buildSessionStore(): SessionChallengeStore
+    {
+        $session = app('session.store');
+
+        if (! $session instanceof \Illuminate\Contracts\Session\Session) {
+            throw new \LogicException('Unable to resolve the Laravel session driver for SessionChallengeStore.');
+        }
+
+        return new SessionChallengeStore($session);
+    }
+
+    private function buildCacheStore(): CacheChallengeStore
+    {
+        $cache = app('cache.store');
+
+        if (! $cache instanceof \Illuminate\Contracts\Cache\Repository) {
+            throw new \LogicException('Unable to resolve the Laravel cache repository for CacheChallengeStore.');
+        }
+
+        return new CacheChallengeStore($cache);
+    }
+
+    private function resolveStoreClass(string $class): ChallengeStore
+    {
+        if (! class_exists($class)) {
+            throw new \LogicException(
+                "Configured services.solana.store '{$class}' is not a known store keyword (session|cache) and does not name an existing class.",
+            );
+        }
+
+        $resolved = app()->make($class);
+
+        if (! $resolved instanceof ChallengeStore) {
+            throw new \LogicException(
+                "Configured services.solana.store '{$class}' does not implement " . ChallengeStore::class . '.',
+            );
+        }
+
+        return $resolved;
     }
 
     /**
      * @param array<array-key, mixed> $user
      */
     #[Override]
-    protected function mapUserToObject(array $user): UserContract
+    protected function mapUserToObject(array $user): User
     {
-        $publicKey = isset($user['publicKey']) && is_string($user['publicKey'])
-            ? $user['publicKey']
-            : '';
+        if (! isset($user['publicKey']) || ! is_string($user['publicKey']) || $user['publicKey'] === '') {
+            throw new InvalidPublicKeyException(
+                'mapUserToObject() was called without a valid publicKey. This is an internal misuse.',
+            );
+        }
+
+        $publicKey = $user['publicKey'];
 
         return (new User())
             ->setRaw($user)
             ->map([
                 'id' => $publicKey,
-                'nickname' => $publicKey,
-                'name' => $publicKey,
+                'nickname' => null,
+                'name' => null,
                 'email' => null,
                 'avatar' => null,
             ]);
@@ -182,7 +301,7 @@ final class Provider extends AbstractProvider
         try {
             return PublicKey::from($value);
         } catch (Throwable $throwable) {
-            throw new InvalidArgumentException(
+            throw new InvalidPublicKeyException(
                 'Invalid Solana public key: ' . $throwable->getMessage(),
                 $throwable->getCode(),
                 previous: $throwable,
@@ -193,14 +312,14 @@ final class Provider extends AbstractProvider
     private function decodeSignature(string $value): string
     {
         try {
-            return Buffer::fromBase58($value)->toBinaryString();
-        } catch (Throwable) {
+            return Base58::decode($value);
+        } catch (InvalidBase58Exception) {
             // fall through to base64
         }
 
         $decoded = base64_decode($value, true);
         if ($decoded === false) {
-            throw new InvalidArgumentException('Signature must be base58 or base64 encoded.');
+            throw new InvalidSignatureException('Signature must be base58 or base64 encoded.');
         }
 
         return $decoded;
@@ -211,14 +330,8 @@ final class Provider extends AbstractProvider
      */
     private function solanaConfig(): array
     {
-        $raw = config('services.solana');
-
-        if (! is_array($raw)) {
-            return [];
-        }
-
         $cfg = [];
-        foreach ($raw as $key => $value) {
+        foreach (Config::array('services.solana', []) as $key => $value) {
             if (is_string($key)) {
                 $cfg[$key] = $value;
             }
@@ -332,11 +445,23 @@ final class Provider extends AbstractProvider
     }
 
     /**
+     * Socialite's manager calls scopes([]) during driver instantiation, so this can
+     * not unconditionally throw. Reject only non-empty input so callers that
+     * deliberately try to set scopes get a clear error instead of a silent no-op.
+     *
      * @param array<array-key, mixed>|string $scopes
      */
     #[Override]
     public function scopes(mixed $scopes): self
     {
+        if (is_string($scopes) && $scopes !== '') {
+            throw new BadMethodCallException('OAuth scopes are not supported by the Solana provider.');
+        }
+
+        if (is_array($scopes) && $scopes !== []) {
+            throw new BadMethodCallException('OAuth scopes are not supported by the Solana provider.');
+        }
+
         return $this;
     }
 }

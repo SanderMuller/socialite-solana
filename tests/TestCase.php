@@ -33,6 +33,7 @@ abstract class TestCase extends Orchestra
             'chain' => 'mainnet',
             'ttl' => 600,
             'resources' => [],
+            'store' => 'session',
         ]);
 
         $app['events']->listen(

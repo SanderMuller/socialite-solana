@@ -11,16 +11,19 @@
   ],
   "repositories": [
     {
-      "type": "vcs",
-      "url": "https://github.com/collectiq/solana-php-sdk"
+      "type": "path",
+      "url": "../solana-pubkey",
+      "options": {
+        "symlink": true
+      }
     }
   ],
   "require": {
     "php": "^8.4",
     "ext-sodium": "*",
-    "collectiq/solana-php-sdk": "dev-main",
     "laravel/framework": "^11.0|^12.0|^13.0",
     "laravel/socialite": "^5.0",
+    "sandermuller/solana-pubkey": "@dev",
     "socialiteproviders/manager": "^4.8"
   },
   "require-dev": {

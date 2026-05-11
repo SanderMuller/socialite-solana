@@ -2,8 +2,8 @@
 
 namespace SanderMuller\SocialiteSolana\Tests;
 
-use Collectiq\SolanaPhpSdk\PublicKey;
-use Collectiq\SolanaPhpSdk\Util\Buffer;
+use SanderMuller\SolanaPubkey\Base58;
+use SanderMuller\SolanaPubkey\PublicKey;
 
 /**
  * @return array{publicKey: string, secretKey: string, publicKeyBase58: string}
@@ -17,7 +17,7 @@ function generateKeypair(): array
     return [
         'publicKey' => $publicKey,
         'secretKey' => $secretKey,
-        'publicKeyBase58' => (new PublicKey($publicKey))->toBase58(),
+        'publicKeyBase58' => PublicKey::fromBytes($publicKey)->toBase58(),
     ];
 }
 
@@ -25,5 +25,5 @@ function signMessageBase58(string $message, string $secretKey): string
 {
     $signature = sodium_crypto_sign_detached($message, $secretKey);
 
-    return Buffer::fromString($signature)->toBase58String();
+    return Base58::encode($signature);
 }

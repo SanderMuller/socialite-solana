@@ -12,6 +12,9 @@
 
 return [
     'solana' => [
+        // Required by socialiteproviders/manager but unused by this driver.
+        'client_id' => env('SOLANA_CLIENT_ID', 'unused'),
+        'client_secret' => env('SOLANA_CLIENT_SECRET', 'unused'),
         'redirect' => env('SOLANA_REDIRECT_URI', '/auth/solana/callback'),
 
         // Domain shown in the SIWS message. Defaults to APP_URL host.
@@ -26,10 +29,17 @@ return [
         // Solana cluster: mainnet | devnet | testnet | localnet.
         'chain' => env('SOLANA_SIWS_CHAIN', 'mainnet'),
 
-        // Challenge lifetime in seconds.
-        'ttl' => (int) env('SOLANA_SIWS_TTL', 600),
+        // Challenge lifetime in seconds (minimum 60). Most wallets resolve a sign
+        // prompt in under 30s; SIWS reference implementations recommend 60-300s.
+        'ttl' => (int) env('SOLANA_SIWS_TTL', 180),
 
         // Optional list<string> of CAIP-122 resources.
         'resources' => [],
+
+        // Challenge storage backend: 'session' (default), 'cache', or a
+        // fully-qualified class name implementing
+        // SanderMuller\SocialiteSolana\Contracts\ChallengeStore. To inject a
+        // fully-customized store, bind the contract in the container instead.
+        'store' => env('SOLANA_CHALLENGE_STORE', 'session'),
     ],
 ];
