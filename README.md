@@ -18,16 +18,8 @@ PHP 8.3+ and Laravel 11, 12, or 13. The `ext-sodium` PHP extension must be enabl
 
 ## Installation
 
-The package and its `sandermuller/solana-pubkey` dependency are not on Packagist yet, so install via VCS repositories. Until tagged releases exist, your root app must also allow dev stability:
-
 ```bash
-composer config minimum-stability dev
-composer config prefer-stable true
-
-composer config repositories.solana-pubkey vcs https://github.com/SanderMuller/solana-pubkey
-composer config repositories.socialite-solana vcs https://github.com/SanderMuller/socialite-solana
-
-composer require sandermuller/socialite-solana:dev-main
+composer require sandermuller/socialite-solana
 ```
 
 Register the Socialite extension listener in `app/Providers/AppServiceProvider.php::boot()` (works on Laravel 11/12/13 — those skeletons no longer ship an `EventServiceProvider`):

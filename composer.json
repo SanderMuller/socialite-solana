@@ -9,18 +9,12 @@
       "email": "sander@hihaho.com"
     }
   ],
-  "repositories": [
-    {
-      "type": "vcs",
-      "url": "https://github.com/SanderMuller/solana-pubkey"
-    }
-  ],
   "require": {
     "php": "^8.3",
     "ext-sodium": "*",
     "laravel/framework": "^11.0|^12.0|^13.0",
     "laravel/socialite": "^5.0",
-    "sandermuller/solana-pubkey": "dev-main",
+    "sandermuller/solana-pubkey": "^0.1",
     "socialiteproviders/manager": "^4.9.2"
   },
   "require-dev": {
