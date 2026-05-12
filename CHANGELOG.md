@@ -2,6 +2,36 @@
 
 All notable changes to `sandermuller/socialite-solana` are documented here.
 
+## v0.1.3 - 2026-05-12
+
+### v0.1.3 — Octane-safe logger resolution
+
+A small patch addressing a correctness issue for long-lived runtimes plus a docs/test polish pass. No breaking changes; no new public API.
+
+#### Fixed
+
+- **Provider no longer caches the container-resolved logger across requests.** Socialite's manager memoizes driver instances per process, so under Octane or Swoole the same `Provider` is reused for many requests. Previously, the first request's `Psr\Log\LoggerInterface` resolution would be cached on the driver instance and reused by every subsequent request — including ones that rebound the container to a different (e.g. request-scoped) logger. The container check is now performed on every call when no explicit `setLogger()` was made. Setter-supplied loggers still cache (explicit consumer intent). `Container::bound()` is O(1) so per-call cost is negligible.
+
+#### Tests
+
+- The "rejects the second of two concurrent verifies on the same nonce" test now exercises the full `verifyCredentials()` path through a custom `ChallengeStore` whose `forget()` returns `true` once and `false` thereafter — modelling two workers that both passed validation before either's atomic claim resolved. Previously the test only asserted `forget()`'s return value directly without going through the Provider.
+
+#### Docs
+
+- README "Logging" example replaces `assert($provider instanceof Provider)` with `/** @var Provider $provider */`. `assert()` compiles out in production (`zend.assertions=-1`), so it was misleading as a runtime guard; the PHPDoc tag is honest about being a static-only hint.
+
+#### Upgrade path
+
+```bash
+composer update sandermuller/socialite-solana
+
+```
+No code changes required. Consumers running Octane/Swoole with custom `LoggerInterface` bindings will start seeing correct per-request logger resolution automatically.
+
+#### Quality
+
+42 tests / 95 assertions, PHP 8.3 + 8.4 × Laravel 11 + 12 + 13 × prefer-lowest + prefer-stable matrix green. PHPStan max + strict + type-coverage 100%, Rector, Pint all clean.
+
 ## v0.1.2 - 2026-05-11
 
 ### Added
@@ -41,9 +71,11 @@ Initial release. Adds a `solana` driver to [Laravel Socialite](https://laravel.c
   - `Socialite::driver('solana')->verifyCredentials(string, string, string, string): User`
   - `Socialite::driver('solana')->challenge(): JsonResponse` — HTTP wrapper
   - `Socialite::driver('solana')->user(): User` — HTTP wrapper
+  
 - **Typed exception hierarchy** under `SanderMuller\SocialiteSolana\Exceptions\` (all extend `\InvalidArgumentException` for backward-compat):
   - `SolanaAuthException` (abstract)
   - `MissingChallengeParameterException`, `InvalidPublicKeyException`, `ChallengeNotFoundException`, `ChallengeExpiredException`, `MessageMismatchException`, `AddressMismatchException`, `InvalidSignatureException`
+  
 - **Pluggable challenge storage** via the `ChallengeStore` contract — `SessionChallengeStore` default for browser flows, `CacheChallengeStore` for Sanctum / bearer-token flows, or bind your own implementation in the container
 - **Atomic nonce consumption**: concurrent verifiers on the same valid bundle resolve to exactly one success
 - **Example Phantom blade view** with a reusable `signMessageBase58(wallet, message)` JS helper
