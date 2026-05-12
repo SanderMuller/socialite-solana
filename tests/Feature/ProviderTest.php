@@ -16,7 +16,6 @@ use SanderMuller\SocialiteSolana\Exceptions\MessageMismatchException;
 use SanderMuller\SocialiteSolana\Exceptions\MissingChallengeParameterException;
 use SanderMuller\SocialiteSolana\Exceptions\SolanaAuthException;
 use SanderMuller\SocialiteSolana\Provider;
-use SanderMuller\SocialiteSolana\Stores\SessionChallengeStore;
 use SanderMuller\SocialiteSolana\Tests\ArrayLogger;
 
 use function SanderMuller\SocialiteSolana\Tests\generateKeypair;
@@ -318,29 +317,64 @@ it('honours a container-bound custom ChallengeStore', function (): void {
 });
 
 it('rejects the second of two concurrent verifies on the same nonce', function (): void {
-    // Simulates two workers that both read the challenge before either consumed it.
-    // Inject a peek-only store wrapper so we can force both verifyCredentials() calls
-    // through the validation gate before the atomic forget() resolves.
+    // Inject a store whose find() always succeeds but whose forget() only returns
+    // true once, modelling two workers that both pass validation before either's
+    // forget() resolves. The loser must hit ChallengeNotFoundException with the
+    // "already been consumed" message — not a generic store_miss.
     $kp = generateKeypair();
     $payload = provider()->buildChallengeFor($kp['publicKeyBase58']);
     $signature = signMessageBase58($payload['message'], $kp['secretKey']);
 
-    // First verify succeeds and atomically claims the nonce.
-    $first = provider()->verifyCredentials(
+    $racingStore = new class ($payload['message'], $kp['publicKeyBase58'], $payload['nonce']) implements ChallengeStore {
+        private int $forgetCalls = 0;
+
+        public function __construct(
+            private string $message,
+            private string $address,
+            private string $nonce,
+        ) {}
+
+        public function put(Challenge $challenge): void
+        {
+            // not used in this test
+        }
+
+        public function find(string $nonce): ?Challenge
+        {
+            return new Challenge($this->nonce, $this->message, $this->address, time() + 600);
+        }
+
+        public function forget(string $nonce): bool
+        {
+            $this->forgetCalls++;
+
+            return $this->forgetCalls === 1;
+        }
+    };
+
+    app()->instance(ChallengeStore::class, $racingStore);
+
+    $user = provider()->verifyCredentials(
         publicKey: $kp['publicKeyBase58'],
         signature: $signature,
         message: $payload['message'],
         nonce: $payload['nonce'],
     );
-    expect($first->getId())->toBe($kp['publicKeyBase58']);
+    expect($user->getId())->toBe($kp['publicKeyBase58']);
 
-    // Re-put the same challenge to simulate a state where the second worker had peeked
-    // before the first worker's forget() ran. The second forget() must return false.
-    $store = app()->make(SessionChallengeStore::class, [
-        'session' => app('session.store'),
-    ]);
-    // Now the nonce is gone — calling forget directly returns false.
-    expect($store->forget($payload['nonce']))->toBeFalse();
+    try {
+        provider()->verifyCredentials(
+            publicKey: $kp['publicKeyBase58'],
+            signature: $signature,
+            message: $payload['message'],
+            nonce: $payload['nonce'],
+        );
+        expect(false)->toBeTrue('second verify must throw');
+    } catch (ChallengeNotFoundException $e) {
+        expect($e->getMessage())->toContain('already been consumed');
+    } finally {
+        app()->forgetInstance(ChallengeStore::class);
+    }
 });
 
 it('throws when ChallengeStore container binding resolves to the wrong type', function (): void {

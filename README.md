@@ -273,8 +273,8 @@ use SanderMuller\SocialiteSolana\Provider;
 
 private function solanaProvider(): Provider
 {
+    /** @var Provider $provider */
     $provider = Socialite::driver('solana');
-    assert($provider instanceof Provider);
 
     $provider->setLogger(Log::channel('security'));
 

@@ -283,13 +283,12 @@ final class Provider extends AbstractProvider
     }
 
     /**
-     * Resolve the ChallengeStore. A container binding for ChallengeStore::class
-     * takes precedence; otherwise the `services.solana.store` config value is
-     * consulted (`session` default, `cache`, or a fully-qualified class name).
-     */
-    /**
-     * Resolve the logger. Setter-supplied instance wins; otherwise check the
-     * container for a bound LoggerInterface; otherwise NullLogger.
+     * Resolve the logger. A setter-supplied instance wins (and is cached on the
+     * Provider so a single setLogger() call is idempotent across the request).
+     * Otherwise the container is consulted on every call so request-scoped
+     * bindings under long-lived runtimes (Octane, Swoole) don't get baked into
+     * a Provider instance that survives multiple requests. NullLogger when
+     * neither is available.
      */
     private function logger(): LoggerInterface
     {
@@ -301,13 +300,18 @@ final class Provider extends AbstractProvider
         if ($container->bound(LoggerInterface::class)) {
             $resolved = $container->make(LoggerInterface::class);
             if ($resolved instanceof LoggerInterface) {
-                return $this->logger = $resolved;
+                return $resolved;
             }
         }
 
-        return $this->logger = new NullLogger();
+        return new NullLogger();
     }
 
+    /**
+     * Resolve the ChallengeStore. A container binding for ChallengeStore::class
+     * takes precedence; otherwise the `services.solana.store` config value is
+     * consulted (`session` default, `cache`, or a fully-qualified class name).
+     */
     private function challengeStore(): ChallengeStore
     {
         $container = app();
