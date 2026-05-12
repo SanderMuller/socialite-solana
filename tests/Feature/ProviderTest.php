@@ -329,9 +329,9 @@ it('rejects the second of two concurrent verifies on the same nonce', function (
         private int $forgetCalls = 0;
 
         public function __construct(
-            private string $message,
-            private string $address,
-            private string $nonce,
+            private readonly string $message,
+            private readonly string $address,
+            private readonly string $nonce,
         ) {}
 
         public function put(Challenge $challenge): void
@@ -339,14 +339,14 @@ it('rejects the second of two concurrent verifies on the same nonce', function (
             // not used in this test
         }
 
-        public function find(string $nonce): ?Challenge
+        public function find(string $nonce): Challenge
         {
             return new Challenge($this->nonce, $this->message, $this->address, time() + 600);
         }
 
         public function forget(string $nonce): bool
         {
-            $this->forgetCalls++;
+            ++$this->forgetCalls;
 
             return $this->forgetCalls === 1;
         }
@@ -370,8 +370,8 @@ it('rejects the second of two concurrent verifies on the same nonce', function (
             nonce: $payload['nonce'],
         );
         expect(false)->toBeTrue('second verify must throw');
-    } catch (ChallengeNotFoundException $e) {
-        expect($e->getMessage())->toContain('already been consumed');
+    } catch (ChallengeNotFoundException $challengeNotFoundException) {
+        expect($challengeNotFoundException->getMessage())->toContain('already been consumed');
     } finally {
         app()->forgetInstance(ChallengeStore::class);
     }
