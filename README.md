@@ -280,6 +280,9 @@ private function solanaProvider(): Provider
 
     return $provider;
 }
+
+// Use it like:
+$user = $this->solanaProvider()->user();
 ```
 
 > [!WARNING]
