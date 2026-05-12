@@ -22,7 +22,7 @@ phpstan.neon
 testbench.yaml
 /coverage
 composer.lock
-.phpunit.result.cache
+/internal
 
 RELEASE_NOTES*.md
 
