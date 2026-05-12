@@ -6,7 +6,7 @@
   "authors": [
     {
       "name": "Sander Muller",
-      "email": "sander@hihaho.com"
+      "email": "github@scode.nl"
     }
   ],
   "require": {
@@ -15,7 +15,7 @@
     "laravel/framework": "^11.0|^12.0|^13.0",
     "laravel/socialite": "^5.0",
     "psr/log": "^3.0",
-    "sandermuller/solana-pubkey": "^0.1",
+    "sandermuller/solana-pubkey": "^0.1.1",
     "socialiteproviders/manager": "^4.9.2"
   },
   "require-dev": {
