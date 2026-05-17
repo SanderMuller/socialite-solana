@@ -1,4 +1,4 @@
-name: Rector check
+name: rector-check
 
 on:
   pull_request:

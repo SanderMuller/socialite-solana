@@ -1,6 +1,13 @@
 # Dependencies
+composer.lock
 /vendor
+/node_modules
 auth.json
+
+# Logs
+npm-debug.log
+yarn-error.log
+storage/logs
 
 # Caches
 .cache
@@ -15,18 +22,20 @@ _ide_helper_models.php
 /.idea
 /.fleet
 /.vscode
+/.cursor
 
-# Misc
-phpunit.xml
-phpstan.neon
-testbench.yaml
-/coverage
-composer.lock
-/internal
-
-RELEASE_NOTES*.md
-
+# Claude Code
 .claude/scheduled_tasks.lock
 
-# Autoresearch artefacts (synthetic corpus, benchmarks, progress logs).
-/autoresearch/
+# Misc
+phpstan.neon
+/docs
+/coverage
+
+# Pre-release drafts (notes flow to GitHub release body, never to git history)
+/internal
+
+# Autoresearch artifacts (benchmarks, progress logs, patches)
+/autoresearch
+
+RELEASE_NOTES*.md

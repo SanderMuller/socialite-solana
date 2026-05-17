@@ -12,11 +12,12 @@
   "require": {
     "php": "^8.3",
     "ext-sodium": "*",
-    "laravel/framework": "^11.0|^12.0|^13.0",
     "laravel/socialite": "^5.0",
     "psr/log": "^3.0",
     "sandermuller/solana-pubkey": "^0.1.1",
-    "socialiteproviders/manager": "^4.9.2"
+    "socialiteproviders/manager": "^4.9.2",
+    "illuminate/contracts": "^11.0|^12.0|^13.0",
+    "illuminate/support": "^11.0|^12.0|^13.0"
   },
   "require-dev": {
     "laravel/pint": "^1.29",
@@ -25,7 +26,6 @@
     "orchestra/testbench": "^11.0",
     "pestphp/pest": "^3.0||^4.4",
     "phpstan/extension-installer": "^1.4",
-    "phpstan/phpstan": "^2.0",
     "phpstan/phpstan-strict-rules": "^2.0",
     "rector/rector": "^2.4.1",
     "rector/type-perfect": "^2.0",
@@ -34,7 +34,16 @@
     "symplify/phpstan-extensions": "^12.0",
     "tomasvotruba/cognitive-complexity": "^1.0",
     "tomasvotruba/type-coverage": "^2.0",
-    "stolt/lean-package-validator": "^5.7.1"
+    "stolt/lean-package-validator": "^5.7.1",
+    "larastan/larastan": "^3",
+    "laravel/boost": "^2.4",
+    "driftingly/rector-laravel": "^2.3",
+    "laravel/pao": "^1.0",
+    "phpstan/phpstan-deprecation-rules": "^2",
+    "phpstan/phpstan-phpunit": "^2",
+    "nunomaduro/collision": "^8.9",
+    "pestphp/pest-plugin-arch": "^4.0",
+    "pestphp/pest-plugin-laravel": "^4.1"
   },
   "autoload": {
     "psr-4": {
@@ -43,7 +52,8 @@
   },
   "autoload-dev": {
     "psr-4": {
-      "SanderMuller\\SocialiteSolana\\Tests\\": "tests/"
+      "SanderMuller\\SocialiteSolana\\Tests\\": "tests/",
+      "Workbench\\App\\": "workbench/app/"
     },
     "files": [
       "tests/Helpers.php"
@@ -64,12 +74,13 @@
       "@phpstan-simplified"
     ]
   },
-  "minimum-stability": "dev",
+  "minimum-stability": "stable",
   "prefer-stable": true,
   "config": {
     "allow-plugins": {
       "pestphp/pest-plugin": true,
       "phpstan/extension-installer": true
-    }
+    },
+    "sort-packages": true
   }
 }

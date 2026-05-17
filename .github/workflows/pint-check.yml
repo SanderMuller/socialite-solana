@@ -1,4 +1,4 @@
-name: Pint check
+name: pint-check
 
 on:
   pull_request:

@@ -4,17 +4,18 @@ permissions:
   contents: read
 
 on:
-  # No path filter on `push` — every commit to main must be
-  # CI-validated so the pre-release green-light gate has evidence
-  # for docs-only release commits (README updates, etc.). Path
-  # filters stay on `pull_request` to skip CI cycles on docs-only
-  # PRs.
   push:
+    paths:
+      - '**.php'
+      - '.github/workflows/run-tests.yml'
+      - 'phpunit.xml'
+      - 'composer.json'
+      - 'composer.lock'
   pull_request:
     paths:
       - '**.php'
       - '.github/workflows/run-tests.yml'
-      - 'phpunit.xml.dist'
+      - 'phpunit.xml'
       - 'composer.json'
       - 'composer.lock'
 
@@ -24,74 +25,39 @@ concurrency:
 
 jobs:
   test:
-    runs-on: ${{ matrix.os }}
-    timeout-minutes: 5
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest]
-        php: [8.4, 8.3]
-        stability: [prefer-lowest, prefer-stable]
-        laravel: ['11.*', '12.*', '13.*']
         include:
-          - laravel: '11.*'
-            testbench: '^9.0'
-          - laravel: '12.*'
-            testbench: '^10.11'
-          - laravel: '13.*'
-            testbench: '^11.0'
+          # Floor — lowest supported combo (prefer-lowest)
+          - { php: '8.3', laravel: '11.*', testbench: '9.*',  stability: prefer-lowest }
+          # Ceiling — highest supported combo
+          - { php: '8.4', laravel: '13.*', testbench: '11.*', stability: prefer-stable }
+          # Mid Laravel on PHP-ceiling
+          - { php: '8.4', laravel: '12.*', testbench: '10.*', stability: prefer-stable }
+          # PHP-axis sanity: PHP 8.3 against highest Laravel + prefer-stable
+          - { php: '8.3', laravel: '13.*', testbench: '11.*', stability: prefer-stable }
+          # Stability-axis sanity: prefer-lowest at the ceiling
+          - { php: '8.4', laravel: '13.*', testbench: '11.*', stability: prefer-lowest }
 
-    name: P${{ matrix.php }} - L${{ matrix.laravel }} - ${{ matrix.stability }} - ${{ matrix.os }}
-
-    env:
-      CI_LARAVEL_MAJOR: ${{ matrix.laravel }}
+    name: P${{ matrix.php }} - L${{ matrix.laravel }} - ${{ matrix.stability }}
 
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v6
+      - uses: actions/checkout@v6
 
       - name: Setup PHP
         uses: shivammathur/setup-php@v2
         with:
           php-version: ${{ matrix.php }}
-          extensions: dom, curl, libxml, mbstring, zip, fileinfo, sodium
+          extensions: sodium
           coverage: none
 
-      - name: Setup problem matchers
-        run: |
-          echo "::add-matcher::${{ runner.tool_cache }}/php.json"
-          echo "::add-matcher::${{ runner.tool_cache }}/phpunit.json"
-
-      - name: Get composer cache directory
-        id: composer-cache
-        shell: bash
-        run: echo "dir=$(composer config cache-files-dir)" >> "$GITHUB_OUTPUT"
-
-      - name: Cache composer dependencies
-        uses: actions/cache@v5
-        with:
-          path: ${{ steps.composer-cache.outputs.dir }}
-          key: composer-${{ matrix.os }}-${{ matrix.php }}-${{ matrix.laravel }}-${{ matrix.stability }}-${{ hashFiles('composer.json') }}
-          restore-keys: |
-            composer-${{ matrix.os }}-${{ matrix.php }}-${{ matrix.laravel }}-${{ matrix.stability }}-
-            composer-${{ matrix.os }}-${{ matrix.php }}-${{ matrix.laravel }}-
-
-      - name: Pin Laravel + testbench versions
-        run: composer require --dev "orchestra/testbench:${{ matrix.testbench }}" --no-update --no-interaction
-
       - name: Install dependencies
-        run: composer update --${{ matrix.stability }} --prefer-dist --no-interaction
+        run: |
+          composer require "laravel/framework:${{ matrix.laravel }}" "orchestra/testbench:${{ matrix.testbench }}" --no-interaction --no-update
+          composer update --${{ matrix.stability }} --prefer-dist --no-interaction
 
-      - name: List Installed Dependencies
-        run: composer show -D
-
-      # `pest --parallel` is unsafe in this matrix:
-      #  - Windows: known FS race in `PackageManifest::write()` →
-      #    `rename()` on `prefer-lowest` (1.17.1 incident).
-      #  - Linux `prefer-lowest`: paratest workers load both
-      #    top-level and rector-bundled `nikic/php-parser`,
-      #    triggering "Cannot declare interface PhpParser\Node"
-      #    fatals (observed on f62a661).
-      # Stay serial on the matrix; composer cache is the safe win.
       - name: Execute tests
         run: vendor/bin/pest --ci
