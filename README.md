@@ -1,5 +1,10 @@
 # Socialite Solana
 
+[![Latest Version on Packagist](https://img.shields.io/packagist/v/sandermuller/socialite-solana.svg?style=flat-square)](https://packagist.org/packages/sandermuller/socialite-solana)
+[![GitHub Tests Action Status](https://img.shields.io/github/actions/workflow/status/sandermuller/socialite-solana/run-tests.yml?branch=main&label=tests&style=flat-square)](https://github.com/sandermuller/socialite-solana/actions/workflows/run-tests.yml)
+[![Total Downloads](https://img.shields.io/packagist/dt/sandermuller/socialite-solana.svg?style=flat-square)](https://packagist.org/packages/sandermuller/socialite-solana)
+[![License](https://img.shields.io/packagist/l/sandermuller/socialite-solana.svg?style=flat-square)](LICENSE)
+
 Laravel Socialite provider for Sign-In With Solana (SIWS / CAIP-122).
 
 This package adds a `solana` driver to [Laravel Socialite](https://laravel.com/docs/socialite). The wallet user signs a SIWS challenge message with their private key; the server verifies the Ed25519 signature and you get back a Socialite `User` keyed by the base58 public key.
