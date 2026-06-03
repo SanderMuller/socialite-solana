@@ -34,7 +34,7 @@
     "symplify/phpstan-extensions": "^12.0",
     "tomasvotruba/cognitive-complexity": "^1.0",
     "tomasvotruba/type-coverage": "^2.0",
-    "stolt/lean-package-validator": "^5.7.1",
+    "stolt/lean-package-validator": "^6.0.0",
     "larastan/larastan": "^3",
     "laravel/boost": "^2.4",
     "driftingly/rector-laravel": "^2.3",
